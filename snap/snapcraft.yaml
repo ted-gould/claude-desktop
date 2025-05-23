@@ -86,43 +86,43 @@ parts:
       
       # Extract Windows download URL using Python and lxml
       DOWNLOAD_URL=$(python3 << 'PYTHON_SCRIPT'
-import sys
-from lxml import html
-
-with open('download_page.html', 'r') as f:
-    content = f.read()
-
-tree = html.fromstring(content)
-
-# Multiple XPath strategies to find the Windows download link
-xpaths = [
-    "//a[contains(@href, 'windows') and contains(@href, '.exe')]/@href",
-    "//a[contains(text(), 'Windows') or contains(text(), 'windows')]/@href",
-    "//button[contains(text(), 'Windows')]/parent::a/@href",
-    "//a[contains(@class, 'windows')]/@href",
-    "//*[contains(text(), 'Windows')]/ancestor::a[1]/@href"
-]
-
-download_url = None
-for xpath in xpaths:
-    urls = tree.xpath(xpath)
-    if urls:
-        for url in urls:
-            if '.exe' in url:
-                download_url = url
-                break
-    if download_url:
-        break
-
-if download_url:
-    # Make URL absolute if needed
-    if not download_url.startswith('http'):
-        download_url = 'https://claude.ai' + download_url
-    print(download_url)
-else:
-    print("ERROR: Could not find Windows download URL", file=sys.stderr)
-    sys.exit(1)
-PYTHON_SCRIPT
+      import sys
+      from lxml import html
+      
+      with open('download_page.html', 'r') as f:
+          content = f.read()
+      
+      tree = html.fromstring(content)
+      
+      # Multiple XPath strategies to find the Windows download link
+      xpaths = [
+          "//a[contains(@href, 'windows') and contains(@href, '.exe')]/@href",
+          "//a[contains(text(), 'Windows') or contains(text(), 'windows')]/@href",
+          "//button[contains(text(), 'Windows')]/parent::a/@href",
+          "//a[contains(@class, 'windows')]/@href",
+          "//*[contains(text(), 'Windows')]/ancestor::a[1]/@href"
+      ]
+      
+      download_url = None
+      for xpath in xpaths:
+          urls = tree.xpath(xpath)
+          if urls:
+              for url in urls:
+                  if '.exe' in url:
+                      download_url = url
+                      break
+          if download_url:
+              break
+      
+      if download_url:
+          # Make URL absolute if needed
+          if not download_url.startswith('http'):
+              download_url = 'https://claude.ai' + download_url
+          print(download_url)
+      else:
+          print("ERROR: Could not find Windows download URL", file=sys.stderr)
+          sys.exit(1)
+      PYTHON_SCRIPT
       )
       
       if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "ERROR: Could not find Windows download URL" ]; then
