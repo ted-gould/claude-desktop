@@ -64,7 +64,7 @@ parts:
     build-packages:
       - p7zip-full
       - imagemagick
-      - icoutils
+      - unzip
     stage-packages:
       - libgtk-3-0
       - libnotify4
@@ -82,21 +82,42 @@ parts:
       # Extract Windows installer
       7z x Claude-Setup-x64.exe
       
-      # Extract the main nupkg file containing app resources
-      NUPKG=$(find . -name "*.nupkg" | head -1)
+      # The installer might contain another archive
+      # Look for .nupkg files (NuGet packages used by Squirrel installers)
+      NUPKG=$(find . -name "*.nupkg" | grep -v "delta" | head -1)
+      
       if [ -n "$NUPKG" ]; then
+        echo "Found nupkg: $NUPKG"
         7z x "$NUPKG" -oapp_contents
+        
+        # The actual app files are usually in lib/net45 or similar
+        APP_DIR=$(find app_contents -name "Claude.exe" -o -name "resources" | head -1 | xargs dirname)
+        if [ -n "$APP_DIR" ]; then
+          cp -r "$APP_DIR"/* $SNAPCRAFT_PART_INSTALL/claude-desktop/
+        fi
+      else
+        # Fallback: Look for the app directory directly
+        APP_DIR=$(find . -name "resources" -type d | head -1 | xargs dirname)
+        if [ -n "$APP_DIR" ]; then
+          cp -r "$APP_DIR"/* $SNAPCRAFT_PART_INSTALL/claude-desktop/
+        fi
       fi
       
-      # Extract application resources
-      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop
-      cp -r app_contents/lib/net45/* $SNAPCRAFT_PART_INSTALL/claude-desktop/ || true
+      # We need to use a Linux Electron binary, not the Windows exe
+      # Download a compatible Electron binary
+      ELECTRON_VERSION=$(grep -oP '"electron":\s*"[^"]*"' $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app/package.json | grep -oP '\d+\.\d+\.\d+' || echo "28.0.0")
+      echo "Detected Electron version: $ELECTRON_VERSION"
       
-      # Handle Electron app.asar if present
-      if [ -f "$SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar" ]; then
-        # Keep app.asar and app.asar.unpacked as is
-        echo "Found app.asar, keeping Electron structure intact"
-      fi
+      # Download Linux Electron binary
+      wget -O electron.zip "https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
+      unzip -o electron.zip -d $SNAPCRAFT_PART_INSTALL/claude-desktop/
+      rm electron.zip
+      
+      # Rename electron executable to claude
+      mv $SNAPCRAFT_PART_INSTALL/claude-desktop/electron $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
+      
+      # Make it executable
+      chmod +x $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
       
       # Create directories for icon and desktop file
       mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
@@ -195,7 +216,7 @@ parts:
       export ELECTRON_IS_SNAP=1
       export ELECTRON_SNAP=$SNAP
       
-      # Launch Claude Desktop with --no-sandbox flag
+      # Launch Claude Desktop
       exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
       EOF
       chmod +x $SNAPCRAFT_PART_INSTALL/bin/claude-desktop-wrapper
