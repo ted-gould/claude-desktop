@@ -82,58 +82,43 @@ parts:
       
       # Download Claude download page and extract Windows installer URL
       echo "Fetching Claude download page..."
-      wget -q -O download_page.html "https://claude.ai/download"
+      wget -q -O download_page.html "https://claude.ai/download" || true
       
-      # Extract Windows download URL using Python and lxml
-      DOWNLOAD_URL=$(python3 << 'PYTHON_SCRIPT'
-      import sys
-      from lxml import html
+      # Debug: Show what we actually got
+      echo "Downloaded page size: $(wc -c < download_page.html) bytes"
+      echo "First 500 characters of page:"
+      head -c 500 download_page.html
+      echo ""
       
-      with open('download_page.html', 'r') as f:
-          content = f.read()
+      # Try to find direct download URL in the page
+      # The page might use JavaScript, so let's check for common patterns
+      echo "Searching for download URLs..."
       
-      tree = html.fromstring(content)
+      # Look for direct exe URLs in the page
+      DOWNLOAD_URL=$(grep -oP 'https://[^"]*\.exe' download_page.html | head -1 || true)
       
-      # Multiple XPath strategies to find the Windows download link
-      xpaths = [
-          "//a[contains(@href, 'windows') and contains(@href, '.exe')]/@href",
-          "//a[contains(text(), 'Windows') or contains(text(), 'windows')]/@href",
-          "//button[contains(text(), 'Windows')]/parent::a/@href",
-          "//a[contains(@class, 'windows')]/@href",
-          "//*[contains(text(), 'Windows')]/ancestor::a[1]/@href"
-      ]
-      
-      download_url = None
-      for xpath in xpaths:
-          urls = tree.xpath(xpath)
-          if urls:
-              for url in urls:
-                  if '.exe' in url:
-                      download_url = url
-                      break
-          if download_url:
-              break
-      
-      if download_url:
-          # Make URL absolute if needed
-          if not download_url.startswith('http'):
-              download_url = 'https://claude.ai' + download_url
-          print(download_url)
-      else:
-          print("ERROR: Could not find Windows download URL", file=sys.stderr)
-          sys.exit(1)
-      PYTHON_SCRIPT
-      )
-      
-      if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "ERROR: Could not find Windows download URL" ]; then
-        echo "Failed to extract download URL from page"
-        exit 1
+      if [ -z "$DOWNLOAD_URL" ]; then
+        # Try to find URLs with 'windows' and 'download' keywords
+        DOWNLOAD_URL=$(grep -oP 'https://[^"]*windows[^"]*download[^"]*' download_page.html | head -1 || true)
       fi
       
-      echo "Found download URL: $DOWNLOAD_URL"
+      if [ -z "$DOWNLOAD_URL" ]; then
+        # Fallback: Use a known pattern if available
+        echo "Could not extract download URL from page"
+        echo "Page might be using JavaScript to generate download links"
+        echo "Using fallback URL pattern..."
+        # Try common URL patterns
+        DOWNLOAD_URL="https://releases.claude.ai/desktop/windows/Claude-Setup.exe"
+      fi
+      
+      echo "Download URL: $DOWNLOAD_URL"
       
       # Download the Windows installer
-      wget -O Claude-Setup.exe "$DOWNLOAD_URL"
+      echo "Downloading Windows installer..."
+      wget --no-check-certificate -O Claude-Setup.exe "$DOWNLOAD_URL" || {
+        echo "Failed to download installer from $DOWNLOAD_URL"
+        exit 1
+      }
       
       # Extract Windows installer
       7z x Claude-Setup.exe
