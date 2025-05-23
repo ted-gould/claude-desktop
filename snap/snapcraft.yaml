@@ -58,14 +58,13 @@ apps:
 
 parts:
   claude-desktop:
-    plugin: nil
+    plugin: dump
+    source: https://storage.googleapis.com/osprey-downloads-c02f6a0d-347c-492b-a752-3e0651722e97/nest-win-x64/Claude-Setup-x64.exe
+    source-type: file
     build-packages:
-      - wget
-      - curl
       - p7zip-full
       - imagemagick
       - icoutils
-      - python3-lxml
     stage-packages:
       - libgtk-3-0
       - libnotify4
@@ -80,48 +79,8 @@ parts:
     override-build: |
       set -eux
       
-      # Download Claude download page and extract Windows installer URL
-      echo "Fetching Claude download page..."
-      wget -q -O download_page.html "https://claude.ai/download" || true
-      
-      # Debug: Show what we actually got
-      echo "Downloaded page size: $(wc -c < download_page.html) bytes"
-      echo "First 500 characters of page:"
-      head -c 500 download_page.html
-      echo ""
-      
-      # Try to find direct download URL in the page
-      # The page might use JavaScript, so let's check for common patterns
-      echo "Searching for download URLs..."
-      
-      # Look for direct exe URLs in the page
-      DOWNLOAD_URL=$(grep -oP 'https://[^"]*\.exe' download_page.html | head -1 || true)
-      
-      if [ -z "$DOWNLOAD_URL" ]; then
-        # Try to find URLs with 'windows' and 'download' keywords
-        DOWNLOAD_URL=$(grep -oP 'https://[^"]*windows[^"]*download[^"]*' download_page.html | head -1 || true)
-      fi
-      
-      if [ -z "$DOWNLOAD_URL" ]; then
-        # Fallback: Use a known pattern if available
-        echo "Could not extract download URL from page"
-        echo "Page might be using JavaScript to generate download links"
-        echo "Using fallback URL pattern..."
-        # Try common URL patterns
-        DOWNLOAD_URL="https://releases.claude.ai/desktop/windows/Claude-Setup.exe"
-      fi
-      
-      echo "Download URL: $DOWNLOAD_URL"
-      
-      # Download the Windows installer
-      echo "Downloading Windows installer..."
-      wget --no-check-certificate -O Claude-Setup.exe "$DOWNLOAD_URL" || {
-        echo "Failed to download installer from $DOWNLOAD_URL"
-        exit 1
-      }
-      
       # Extract Windows installer
-      7z x Claude-Setup.exe
+      7z x Claude-Setup-x64.exe
       
       # Extract the main nupkg file containing app resources
       NUPKG=$(find . -name "*.nupkg" | head -1)
@@ -144,7 +103,7 @@ parts:
       mkdir -p $SNAPCRAFT_PART_INSTALL/snap/gui
       
       # Extract icon from Windows executable
-      wrestool -x -t 14 Claude-Setup.exe > claude.ico || true
+      wrestool -x -t 14 Claude-Setup-x64.exe > claude.ico || true
       if [ -f claude.ico ]; then
         icotool -x claude.ico
         # Use the highest resolution PNG
