@@ -17,7 +17,6 @@ description: |
   application. Some features may have limited functionality compared to
   the official Windows/macOS versions.
 
-icon: snap/gui/claude-desktop.png
 license: Proprietary
 contact: https://claude.ai/support
 website: https://claude.ai
@@ -31,7 +30,7 @@ architectures:
 
 apps:
   claude-desktop:
-    command: claude-desktop/claude --no-sandbox
+    command: bin/claude-desktop-wrapper
     desktop: snap/gui/claude-desktop.desktop
     extensions: [gnome]
     environment:
@@ -99,18 +98,31 @@ parts:
         echo "Found app.asar, keeping Electron structure intact"
       fi
       
+      # Create directories for icon and desktop file
+      mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
+      mkdir -p $SNAPCRAFT_PART_INSTALL/snap/gui
+      
       # Extract icon from Windows executable
       wrestool -x -t 14 Claude-Setup.exe > claude.ico || true
       if [ -f claude.ico ]; then
         icotool -x claude.ico
         # Use the highest resolution PNG
-        cp $(ls -1 claude_*_256x256x32.png 2>/dev/null | head -1 || ls -1 claude_*.png | sort -V | tail -1) \
-           $SNAPCRAFT_PART_INSTALL/meta/gui/claude-desktop.png || true
+        PNG_FILE=$(ls -1 claude_*_256x256x32.png 2>/dev/null | head -1 || ls -1 claude_*.png | sort -V | tail -1)
+        if [ -n "$PNG_FILE" ]; then
+          cp "$PNG_FILE" $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
+          cp "$PNG_FILE" $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png
+        fi
+      fi
+      
+      # If no icon extracted, create a placeholder
+      if [ ! -f "$SNAPCRAFT_PART_INSTALL/meta/gui/icon.png" ]; then
+        convert -size 256x256 xc:white -fill black -gravity center -pointsize 72 -annotate +0+0 'C' \
+          $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
+        cp $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png
       fi
       
       # Create desktop file
-      mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
-      cat > $SNAPCRAFT_PART_INSTALL/meta/gui/claude-desktop.desktop << 'EOF'
+      cat > $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.desktop << 'EOF'
       [Desktop Entry]
       Type=Application
       Version=1.0
@@ -118,7 +130,7 @@ parts:
       GenericName=AI Assistant
       Comment=Anthropic's Claude AI desktop application
       Exec=claude-desktop %U
-      Icon=${SNAP}/meta/gui/claude-desktop.png
+      Icon=${SNAP}/meta/gui/icon.png
       Terminal=false
       StartupNotify=true
       Categories=Office;Utility;
@@ -184,8 +196,8 @@ parts:
       export ELECTRON_IS_SNAP=1
       export ELECTRON_SNAP=$SNAP
       
-      # Launch Claude Desktop
-      exec "$SNAP/claude-desktop/claude" "$@"
+      # Launch Claude Desktop with --no-sandbox flag
+      exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
       EOF
       chmod +x $SNAPCRAFT_PART_INSTALL/bin/claude-desktop-wrapper
 
