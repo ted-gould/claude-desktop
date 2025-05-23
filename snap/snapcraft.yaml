@@ -141,7 +141,6 @@ parts:
       [Desktop Action NewChat]
       Name=New Chat
       Exec=claude-desktop --new-chat
-      Icon=document-new
       EOF
       
   claude-native-bindings:
