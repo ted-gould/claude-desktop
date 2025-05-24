@@ -125,24 +125,25 @@ parts:
       mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
       mkdir -p $SNAPCRAFT_PART_INSTALL/snap/gui
       
-      # Extract icon from Windows executable
-      wrestool -x -t 14 Claude-Setup-x64.exe > claude.ico || true
-      if [ -f claude.ico ]; then
-        icotool -x claude.ico
-        # Use the highest resolution PNG
-        PNG_FILE=$(ls -1 claude_*_256x256x32.png 2>/dev/null | head -1 || ls -1 claude_*.png | sort -V | tail -1)
-        if [ -n "$PNG_FILE" ]; then
-          cp "$PNG_FILE" $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
-          cp "$PNG_FILE" $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png
-        fi
-      fi
+      # Look for icon in resources
+      ICON_FILE=$(find $SNAPCRAFT_PART_INSTALL/claude-desktop/resources -name "*.png" -o -name "*.ico" | grep -E "(icon|logo|claude)" | head -1)
       
-      # If no icon extracted, create a placeholder
-      if [ ! -f "$SNAPCRAFT_PART_INSTALL/meta/gui/icon.png" ]; then
+      if [ -n "$ICON_FILE" ]; then
+        # If it's an ICO, we'd need to convert it, but for now just create a placeholder
+        if [[ "$ICON_FILE" == *.ico ]]; then
+          # Create placeholder icon
+          convert -size 256x256 xc:white -fill black -gravity center -pointsize 72 -annotate +0+0 'C' \
+            $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
+        else
+          cp "$ICON_FILE" $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
+        fi
+      else
+        # Create placeholder icon
         convert -size 256x256 xc:white -fill black -gravity center -pointsize 72 -annotate +0+0 'C' \
           $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
-        cp $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png
       fi
+      
+      cp $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png
       
       # Create desktop file
       cat > $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.desktop << 'EOF'
