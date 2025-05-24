@@ -23,7 +23,7 @@ website: https://claude.ai
 issues: https://github.com/[community-maintainer]/claude-desktop-snap/issues
 
 grade: stable
-confinement: strict
+confinement: devmode
 base: core22
 architectures:
   - amd64
@@ -129,9 +129,15 @@ parts:
       # Make it executable
       chmod +x $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
       
-      # Fix permissions for any native modules
+      # Fix permissions for all files
+      find $SNAPCRAFT_PART_INSTALL -type f -exec chmod 644 {} \;
+      find $SNAPCRAFT_PART_INSTALL -type d -exec chmod 755 {} \;
+      
+      # Make executables and libraries executable
       find $SNAPCRAFT_PART_INSTALL -name "*.node" -type f -exec chmod 755 {} \;
       find $SNAPCRAFT_PART_INSTALL -name "*.so" -type f -exec chmod 755 {} \;
+      find $SNAPCRAFT_PART_INSTALL -name "claude" -type f -exec chmod 755 {} \;
+      chmod +x $SNAPCRAFT_PART_INSTALL/claude-desktop/claude || true
       
       # Remove Windows native bindings and replace with Linux stub
       rm -rf $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native || true
@@ -220,6 +226,12 @@ parts:
   
   electron-wrapper:
     plugin: nil
+    override-prime: |
+      snapcraftctl prime
+      # Ensure all files have proper permissions in the final snap
+      chmod -R u+r,g+r,o+r $SNAPCRAFT_PRIME
+      find $SNAPCRAFT_PRIME -type d -exec chmod 755 {} \;
+      find $SNAPCRAFT_PRIME -name "*.asar" -exec chmod 644 {} \;
     override-build: |
       # Create wrapper script to handle Electron execution
       mkdir -p $SNAPCRAFT_PART_INSTALL/bin
