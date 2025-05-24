@@ -39,6 +39,8 @@ apps:
       ELECTRON_DISABLE_SECURITY_WARNINGS: 1
       # Path for MCP configuration
       CLAUDE_CONFIG_PATH: $SNAP_USER_DATA/.config/Claude
+      # Disable sandboxing that might interfere
+      ELECTRON_NO_SANDBOX: 1
     plugs:
       - audio-playback
       - browser-support
@@ -75,6 +77,9 @@ parts:
       - imagemagick
       - unzip
       - npm
+      - nodejs
+      - build-essential
+      - python3
     stage-packages:
       - libgtk-3-0
       - libnotify4
@@ -93,7 +98,6 @@ parts:
       7z x Claude-Setup-x64.exe
       
       # The installer might contain another archive
-      # Look for .nupkg files (NuGet packages used by Squirrel installers)
       NUPKG=$(find . -name "*.nupkg" | grep -v "delta" | head -1)
       
       if [ -n "$NUPKG" ]; then
@@ -106,121 +110,138 @@ parts:
           mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop
           cp -r "$APP_DIR"/* $SNAPCRAFT_PART_INSTALL/claude-desktop/
         fi
-      else
-        # Fallback: Look for the app directory directly
-        APP_DIR=$(find . -name "resources" -type d | head -1 | xargs dirname)
-        if [ -n "$APP_DIR" ]; then
-          cp -r "$APP_DIR"/* $SNAPCRAFT_PART_INSTALL/claude-desktop/
-        fi
       fi
       
-      # We need to use a Linux Electron binary, not the Windows exe
-      # Download a compatible Electron binary
-      ELECTRON_VERSION=$(grep -oP '"electron":\s*"[^"]*"' $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app/package.json | grep -oP '\d+\.\d+\.\d+' || echo "28.0.0")
-      echo "Detected Electron version: $ELECTRON_VERSION"
-      
       # Download Linux Electron binary
+      ELECTRON_VERSION="28.0.0"
+      echo "Using Electron version: $ELECTRON_VERSION"
+      
       wget -O electron.zip "https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
       unzip -o electron.zip -d $SNAPCRAFT_PART_INSTALL/claude-desktop/
       rm electron.zip
       
-      # Rename electron executable to claude
+      # Rename electron executable
       mv $SNAPCRAFT_PART_INSTALL/claude-desktop/electron $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
-      
-      # Make it executable
       chmod +x $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
       
-      # Fix permissions for all files
+      # Fix permissions
       find $SNAPCRAFT_PART_INSTALL -type f -exec chmod 644 {} \;
       find $SNAPCRAFT_PART_INSTALL -type d -exec chmod 755 {} \;
-      
-      # Make executables and libraries executable
       find $SNAPCRAFT_PART_INSTALL -name "*.node" -type f -exec chmod 755 {} \;
       find $SNAPCRAFT_PART_INSTALL -name "*.so" -type f -exec chmod 755 {} \;
       find $SNAPCRAFT_PART_INSTALL -name "claude" -type f -exec chmod 755 {} \;
-      chmod +x $SNAPCRAFT_PART_INSTALL/claude-desktop/claude || true
       
-      # Remove Windows native bindings and replace with Linux stub
-      rm -rf $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native || true
+      # Create a native module stub
+      mkdir -p $SNAPCRAFT_PART_INSTALL/native-stub
+      cd $SNAPCRAFT_PART_INSTALL/native-stub
       
-      # Create directory for our stub
-      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
+      # Create a minimal Node.js native addon that exports our stub functions
+      cat > binding.cc << 'EOF'
+      #include <node.h>
+      #include <v8.h>
       
-      # Create package.json for the module
-      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/package.json << 'EOF'
+      using namespace v8;
+      
+      void RegisterGlobalShortcut(const FunctionCallbackInfo<Value>& args) {
+        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
+      }
+      
+      void UnregisterGlobalShortcut(const FunctionCallbackInfo<Value>& args) {
+        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
+      }
+      
+      void UnregisterAllGlobalShortcuts(const FunctionCallbackInfo<Value>& args) {
+        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
+      }
+      
+      void SetTrayIcon(const FunctionCallbackInfo<Value>& args) {
+        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
+      }
+      
+      void ShowTrayBalloon(const FunctionCallbackInfo<Value>& args) {
+        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
+      }
+      
+      void GetWindowHandle(const FunctionCallbackInfo<Value>& args) {
+        args.GetReturnValue().SetNull();
+      }
+      
+      void IsAccessibilityEnabled(const FunctionCallbackInfo<Value>& args) {
+        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
+      }
+      
+      void SetLoginItemSettings(const FunctionCallbackInfo<Value>& args) {
+        // No-op
+      }
+      
+      void GetLoginItemSettings(const FunctionCallbackInfo<Value>& args) {
+        Isolate* isolate = args.GetIsolate();
+        Local<Object> obj = Object::New(isolate);
+        obj->Set(isolate->GetCurrentContext(),
+                 String::NewFromUtf8(isolate, "openAtLogin").ToLocalChecked(),
+                 Boolean::New(isolate, false));
+        args.GetReturnValue().Set(obj);
+      }
+      
+      void Initialize(Local<Object> exports) {
+        NODE_SET_METHOD(exports, "registerGlobalShortcut", RegisterGlobalShortcut);
+        NODE_SET_METHOD(exports, "unregisterGlobalShortcut", UnregisterGlobalShortcut);
+        NODE_SET_METHOD(exports, "unregisterAllGlobalShortcuts", UnregisterAllGlobalShortcuts);
+        NODE_SET_METHOD(exports, "setTrayIcon", SetTrayIcon);
+        NODE_SET_METHOD(exports, "showTrayBalloon", ShowTrayBalloon);
+        NODE_SET_METHOD(exports, "getWindowHandle", GetWindowHandle);
+        NODE_SET_METHOD(exports, "isAccessibilityEnabled", IsAccessibilityEnabled);
+        NODE_SET_METHOD(exports, "setLoginItemSettings", SetLoginItemSettings);
+        NODE_SET_METHOD(exports, "getLoginItemSettings", GetLoginItemSettings);
+      }
+      
+      NODE_MODULE(NODE_GYP_MODULE_NAME, Initialize)
+      EOF
+      
+      # Create binding.gyp
+      cat > binding.gyp << 'EOF'
       {
-        "name": "claude-native",
-        "version": "1.0.0",
-        "main": "index.js"
+        "targets": [
+          {
+            "target_name": "claude-native-binding",
+            "sources": [ "binding.cc" ]
+          }
+        ]
       }
       EOF
       
-      # Create Linux-compatible stub
-      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/index.js << 'EOF'
-      // Linux stub implementation for claude-native
-      console.log('Loading Linux stub for claude-native module');
-      
-      module.exports = {
-        registerGlobalShortcut: (shortcut, callback) => {
-          console.log(`Global shortcut ${shortcut} registered (stub)`);
-          return true;
-        },
-        unregisterGlobalShortcut: (shortcut) => {
-          console.log(`Global shortcut ${shortcut} unregistered (stub)`);
-          return true;
-        },
-        unregisterAllGlobalShortcuts: () => {
-          console.log('All global shortcuts unregistered (stub)');
-          return true;
-        },
-        setTrayIcon: (iconPath) => {
-          console.log(`Tray icon set to ${iconPath} (stub)`);
-          return true;
-        },
-        showTrayBalloon: (title, content) => {
-          console.log(`Tray balloon: ${title} - ${content} (stub)`);
-          return true;
-        },
-        getWindowHandle: () => {
-          return null;
-        },
-        isAccessibilityEnabled: () => {
-          return true;
-        },
-        setLoginItemSettings: (settings) => {
-          console.log('Login item settings updated (stub)', settings);
-        },
-        getLoginItemSettings: () => {
-          return { openAtLogin: false };
-        }
-      };
-      
-      // Also export any specific bindings that might be required
-      module.exports.binding = module.exports;
+      # Create package.json
+      cat > package.json << 'EOF'
+      {
+        "name": "claude-native-stub",
+        "version": "1.0.0",
+        "gypfile": true
+      }
       EOF
       
-      # Create directories for icon and desktop file
+      # Build the native module for Electron 28
+      export npm_config_target=$ELECTRON_VERSION
+      export npm_config_arch=x64
+      export npm_config_target_arch=x64
+      export npm_config_disturl=https://electronjs.org/headers
+      export npm_config_runtime=electron
+      export npm_config_build_from_source=true
+      
+      HOME=/tmp npm install
+      HOME=/tmp ./node_modules/.bin/node-gyp rebuild --target=$ELECTRON_VERSION --arch=x64 --dist-url=https://electronjs.org/headers
+      
+      # Copy the built module to the correct location
+      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
+      cp build/Release/claude-native-binding.node $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/
+      
+      cd -
+      
+      # Create icon
       mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
       mkdir -p $SNAPCRAFT_PART_INSTALL/snap/gui
       
-      # Look for icon in resources
-      ICON_FILE=$(find $SNAPCRAFT_PART_INSTALL/claude-desktop/resources -name "*.png" -o -name "*.ico" | grep -E "(icon|logo|claude)" | head -1)
-      
-      if [ -n "$ICON_FILE" ]; then
-        # If it's an ICO, we'd need to convert it, but for now just create a placeholder
-        if [[ "$ICON_FILE" == *.ico ]]; then
-          # Create placeholder icon
-          convert -size 256x256 xc:white -fill black -gravity center -pointsize 72 -annotate +0+0 'C' \
-            $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
-        else
-          cp "$ICON_FILE" $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
-        fi
-      else
-        # Create placeholder icon
-        convert -size 256x256 xc:white -fill black -gravity center -pointsize 72 -annotate +0+0 'C' \
-          $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
-      fi
-      
+      convert -size 256x256 xc:white -fill black -gravity center -pointsize 72 -annotate +0+0 'C' \
+        $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
       cp $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png
       
       # Create desktop file
@@ -260,11 +281,6 @@ parts:
       #!/bin/bash
       set -e
       
-      # Debug mode
-      if [ "${CLAUDE_DEBUG}" = "1" ]; then
-        set -x
-      fi
-      
       # Ensure config directory exists
       mkdir -p $SNAP_USER_DATA/.config/Claude
       
@@ -281,34 +297,7 @@ parts:
       export ELECTRON_IS_SNAP=1
       export ELECTRON_SNAP=$SNAP
       
-      # Debug: Check if executable exists
-      if [ ! -f "$SNAP/claude-desktop/claude" ]; then
-        echo "ERROR: Claude executable not found at $SNAP/claude-desktop/claude"
-        ls -la "$SNAP/claude-desktop/" | head -20
-        exit 1
-      fi
-      
-      # Debug: Check resources
-      if [ ! -d "$SNAP/claude-desktop/resources" ]; then
-        echo "ERROR: Resources directory not found"
-        find "$SNAP/claude-desktop" -type d | head -20
-        exit 1
-      fi
-      
-      # Debug: Log startup
-      echo "Starting Claude Desktop from: $SNAP/claude-desktop/claude"
-      echo "Resources at: $SNAP/claude-desktop/resources"
-      
-      # Try to capture any error output
-      if [ "${CLAUDE_DEBUG}" = "1" ]; then
-        # In debug mode, show all output
-        "$SNAP/claude-desktop/claude" --no-sandbox --enable-logging --v=1 "$@" 2>&1 | tee /tmp/claude-debug.log &
-        CLAUDE_PID=$!
-        echo "Claude Desktop started with PID: $CLAUDE_PID"
-        wait $CLAUDE_PID
-      else
-        # Normal mode
-        exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
-      fi
+      # Launch Claude Desktop
+      exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
       EOF
       chmod +x $SNAPCRAFT_PART_INSTALL/bin/claude-desktop-wrapper
