@@ -74,6 +74,7 @@ parts:
       - p7zip-full
       - imagemagick
       - unzip
+      - npm
     stage-packages:
       - libgtk-3-0
       - libnotify4
@@ -145,9 +146,20 @@ parts:
       # Create directory for our stub
       mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
       
+      # Create package.json for the module
+      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/package.json << 'EOF'
+      {
+        "name": "claude-native",
+        "version": "1.0.0",
+        "main": "index.js"
+      }
+      EOF
+      
       # Create Linux-compatible stub
       cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/index.js << 'EOF'
-      // Linux stub implementation for claude-native-bindings
+      // Linux stub implementation for claude-native
+      console.log('Loading Linux stub for claude-native module');
+      
       module.exports = {
         registerGlobalShortcut: (shortcut, callback) => {
           console.log(`Global shortcut ${shortcut} registered (stub)`);
@@ -174,8 +186,17 @@ parts:
         },
         isAccessibilityEnabled: () => {
           return true;
+        },
+        setLoginItemSettings: (settings) => {
+          console.log('Login item settings updated (stub)', settings);
+        },
+        getLoginItemSettings: () => {
+          return { openAtLogin: false };
         }
       };
+      
+      // Also export any specific bindings that might be required
+      module.exports.binding = module.exports;
       EOF
       
       # Create directories for icon and desktop file
@@ -281,7 +302,10 @@ parts:
       # Try to capture any error output
       if [ "${CLAUDE_DEBUG}" = "1" ]; then
         # In debug mode, show all output
-        exec "$SNAP/claude-desktop/claude" --no-sandbox --enable-logging --v=1 "$@" 2>&1 | tee /tmp/claude-debug.log
+        "$SNAP/claude-desktop/claude" --no-sandbox --enable-logging --v=1 "$@" 2>&1 | tee /tmp/claude-debug.log &
+        CLAUDE_PID=$!
+        echo "Claude Desktop started with PID: $CLAUDE_PID"
+        wait $CLAUDE_PID
       else
         # Normal mode
         exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
