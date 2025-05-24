@@ -56,12 +56,21 @@ apps:
       - wayland
       - x11
 
+layout:
+  /usr/share/fonts:
+    bind: $SNAP/usr/share/fonts
+  /usr/share/icons:
+    bind: $SNAP/usr/share/icons
+  /usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.0:
+    bind: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.0
+
 parts:
   claude-desktop:
     plugin: dump
     source: https://storage.googleapis.com/osprey-downloads-c02f6a0d-347c-492b-a752-3e0651722e97/nest-win-x64/Claude-Setup-x64.exe
     source-type: file
     build-packages:
+      - wget
       - p7zip-full
       - imagemagick
       - unzip
@@ -124,6 +133,45 @@ parts:
       find $SNAPCRAFT_PART_INSTALL -name "*.node" -type f -exec chmod 755 {} \;
       find $SNAPCRAFT_PART_INSTALL -name "*.so" -type f -exec chmod 755 {} \;
       
+      # Remove Windows native bindings and replace with Linux stub
+      rm -rf $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native || true
+      
+      # Create directory for our stub
+      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
+      
+      # Create Linux-compatible stub
+      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/index.js << 'EOF'
+      // Linux stub implementation for claude-native-bindings
+      module.exports = {
+        registerGlobalShortcut: (shortcut, callback) => {
+          console.log(`Global shortcut ${shortcut} registered (stub)`);
+          return true;
+        },
+        unregisterGlobalShortcut: (shortcut) => {
+          console.log(`Global shortcut ${shortcut} unregistered (stub)`);
+          return true;
+        },
+        unregisterAllGlobalShortcuts: () => {
+          console.log('All global shortcuts unregistered (stub)');
+          return true;
+        },
+        setTrayIcon: (iconPath) => {
+          console.log(`Tray icon set to ${iconPath} (stub)`);
+          return true;
+        },
+        showTrayBalloon: (title, content) => {
+          console.log(`Tray balloon: ${title} - ${content} (stub)`);
+          return true;
+        },
+        getWindowHandle: () => {
+          return null;
+        },
+        isAccessibilityEnabled: () => {
+          return true;
+        }
+      };
+      EOF
+      
       # Create directories for icon and desktop file
       mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
       mkdir -p $SNAPCRAFT_PART_INSTALL/snap/gui
@@ -169,49 +217,6 @@ parts:
       Name=New Chat
       Exec=claude-desktop --new-chat
       EOF
-      
-  claude-native-bindings:
-    plugin: nil
-    after: [claude-desktop]
-    override-build: |
-      # Remove Windows native bindings and replace with Linux stub
-      rm -rf $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native || true
-      
-      # Create directory for our stub
-      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
-      
-      # Create Linux-compatible stub
-      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/index.js << 'EOF'
-      // Linux stub implementation for claude-native-bindings
-      module.exports = {
-        registerGlobalShortcut: (shortcut, callback) => {
-          console.log(`Global shortcut ${shortcut} registered (stub)`);
-          return true;
-        },
-        unregisterGlobalShortcut: (shortcut) => {
-          console.log(`Global shortcut ${shortcut} unregistered (stub)`);
-          return true;
-        },
-        unregisterAllGlobalShortcuts: () => {
-          console.log('All global shortcuts unregistered (stub)');
-          return true;
-        },
-        setTrayIcon: (iconPath) => {
-          console.log(`Tray icon set to ${iconPath} (stub)`);
-          return true;
-        },
-        showTrayBalloon: (title, content) => {
-          console.log(`Tray balloon: ${title} - ${content} (stub)`);
-          return true;
-        },
-        getWindowHandle: () => {
-          return null;
-        },
-        isAccessibilityEnabled: () => {
-          return true;
-        }
-      };
-      EOF
   
   electron-wrapper:
     plugin: nil
@@ -242,20 +247,3 @@ parts:
       exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
       EOF
       chmod +x $SNAPCRAFT_PART_INSTALL/bin/claude-desktop-wrapper
-
-layout:
-  /usr/share/fonts:
-    bind: $SNAP/usr/share/fonts
-  /usr/share/icons:
-    bind: $SNAP/usr/share/icons
-  /usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.0:
-    bind: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.0
-
-parts:
-  fix-permissions:
-    plugin: nil
-    after: [claude-desktop]
-    override-prime: |
-      # Fix permissions for native modules
-      find $SNAPCRAFT_PRIME -name "*.node" -type f -exec chmod 755 {} \;
-      find $SNAPCRAFT_PRIME -name "*.so" -type f -exec chmod 755 {} \;
