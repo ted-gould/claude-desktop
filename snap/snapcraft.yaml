@@ -93,6 +93,7 @@ parts:
         # The actual app files are usually in lib/net45 or similar
         APP_DIR=$(find app_contents -name "Claude.exe" -o -name "resources" | head -1 | xargs dirname)
         if [ -n "$APP_DIR" ]; then
+          mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop
           cp -r "$APP_DIR"/* $SNAPCRAFT_PART_INSTALL/claude-desktop/
         fi
       else
