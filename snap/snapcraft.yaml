@@ -227,6 +227,11 @@ parts:
       #!/bin/bash
       set -e
       
+      # Debug mode
+      if [ "${CLAUDE_DEBUG}" = "1" ]; then
+        set -x
+      fi
+      
       # Ensure config directory exists
       mkdir -p $SNAP_USER_DATA/.config/Claude
       
@@ -243,7 +248,31 @@ parts:
       export ELECTRON_IS_SNAP=1
       export ELECTRON_SNAP=$SNAP
       
-      # Launch Claude Desktop
-      exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
+      # Debug: Check if executable exists
+      if [ ! -f "$SNAP/claude-desktop/claude" ]; then
+        echo "ERROR: Claude executable not found at $SNAP/claude-desktop/claude"
+        ls -la "$SNAP/claude-desktop/" | head -20
+        exit 1
+      fi
+      
+      # Debug: Check resources
+      if [ ! -d "$SNAP/claude-desktop/resources" ]; then
+        echo "ERROR: Resources directory not found"
+        find "$SNAP/claude-desktop" -type d | head -20
+        exit 1
+      fi
+      
+      # Debug: Log startup
+      echo "Starting Claude Desktop from: $SNAP/claude-desktop/claude"
+      echo "Resources at: $SNAP/claude-desktop/resources"
+      
+      # Try to capture any error output
+      if [ "${CLAUDE_DEBUG}" = "1" ]; then
+        # In debug mode, show all output
+        exec "$SNAP/claude-desktop/claude" --no-sandbox --enable-logging --v=1 "$@" 2>&1 | tee /tmp/claude-debug.log
+      else
+        # Normal mode
+        exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
+      fi
       EOF
       chmod +x $SNAPCRAFT_PART_INSTALL/bin/claude-desktop-wrapper
