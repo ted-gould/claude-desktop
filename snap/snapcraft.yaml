@@ -65,7 +65,6 @@ parts:
       - p7zip-full
       - imagemagick
       - unzip
-      - wget
     stage-packages:
       - libgtk-3-0
       - libnotify4
@@ -121,6 +120,10 @@ parts:
       # Make it executable
       chmod +x $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
       
+      # Fix permissions for any native modules
+      find $SNAPCRAFT_PART_INSTALL -name "*.node" -type f -exec chmod 755 {} \;
+      find $SNAPCRAFT_PART_INSTALL -name "*.so" -type f -exec chmod 755 {} \;
+      
       # Create directories for icon and desktop file
       mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
       mkdir -p $SNAPCRAFT_PART_INSTALL/snap/gui
@@ -169,10 +172,16 @@ parts:
       
   claude-native-bindings:
     plugin: nil
+    after: [claude-desktop]
     override-build: |
-      # Create Linux-compatible stub for claude-native-bindings
-      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources
-      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/claude-native-bindings.js << 'EOF'
+      # Remove Windows native bindings and replace with Linux stub
+      rm -rf $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native || true
+      
+      # Create directory for our stub
+      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
+      
+      # Create Linux-compatible stub
+      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/index.js << 'EOF'
       // Linux stub implementation for claude-native-bindings
       module.exports = {
         registerGlobalShortcut: (shortcut, callback) => {
@@ -183,12 +192,22 @@ parts:
           console.log(`Global shortcut ${shortcut} unregistered (stub)`);
           return true;
         },
+        unregisterAllGlobalShortcuts: () => {
+          console.log('All global shortcuts unregistered (stub)');
+          return true;
+        },
         setTrayIcon: (iconPath) => {
           console.log(`Tray icon set to ${iconPath} (stub)`);
           return true;
         },
         showTrayBalloon: (title, content) => {
           console.log(`Tray balloon: ${title} - ${content} (stub)`);
+          return true;
+        },
+        getWindowHandle: () => {
+          return null;
+        },
+        isAccessibilityEnabled: () => {
           return true;
         }
       };
@@ -231,3 +250,12 @@ layout:
     bind: $SNAP/usr/share/icons
   /usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.0:
     bind: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.0
+
+parts:
+  fix-permissions:
+    plugin: nil
+    after: [claude-desktop]
+    override-prime: |
+      # Fix permissions for native modules
+      find $SNAPCRAFT_PRIME -name "*.node" -type f -exec chmod 755 {} \;
+      find $SNAPCRAFT_PRIME -name "*.so" -type f -exec chmod 755 {} \;
