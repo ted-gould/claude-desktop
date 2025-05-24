@@ -65,6 +65,7 @@ parts:
       - p7zip-full
       - imagemagick
       - unzip
+      - wget
     stage-packages:
       - libgtk-3-0
       - libnotify4
