@@ -150,12 +150,72 @@ parts:
       mv $SNAPCRAFT_PART_INSTALL/claude-desktop/electron $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
       chmod +x $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
       
-      # Handle the native bindings issue by creating stub bindings
+      # Handle the native bindings issue by patching app.asar
+      cd $SNAPCRAFT_PART_INSTALL/claude-desktop/resources
+      
+      # Extract app.asar to patch it
+      npx asar extract app.asar app_patched
+      
+      # Patch the claude-native module inside app.asar
+      if [ -f "app_patched/node_modules/claude-native/index.js" ]; then
+        echo "Patching claude-native module in app.asar..."
+        
+        # Replace the entire claude-native module with our stub
+        cat > app_patched/node_modules/claude-native/index.js << 'EOF'
+      // Linux stub for claude-native module
+      console.log('[claude-native] Using Linux stub implementation');
+      
+      const stub = {
+        registerGlobalShortcut: (accelerator, callback) => {
+          console.log('[claude-native] registerGlobalShortcut:', accelerator);
+          return true;
+        },
+        unregisterGlobalShortcut: (accelerator) => {
+          console.log('[claude-native] unregisterGlobalShortcut:', accelerator);
+          return true;
+        },
+        unregisterAllGlobalShortcuts: () => {
+          console.log('[claude-native] unregisterAllGlobalShortcuts');
+          return true;
+        },
+        isAccessibilityEnabled: () => {
+          return true;
+        },
+        setLoginItemSettings: (settings) => {
+          console.log('[claude-native] setLoginItemSettings:', settings);
+        },
+        getLoginItemSettings: () => {
+          return { openAtLogin: false };
+        },
+        setTrayIcon: (iconPath) => {
+          console.log('[claude-native] setTrayIcon:', iconPath);
+          return true;
+        },
+        showTrayBalloon: (options) => {
+          console.log('[claude-native] showTrayBalloon:', options);
+          return true;
+        },
+        getWindowHandle: () => {
+          return null;
+        }
+      };
+      
+      module.exports = stub;
+      EOF
+      fi
+      
+      # Repack app.asar with our patched module
+      npx asar pack app_patched app.asar
+      rm -rf app_patched
+      
+      cd -
+      
+      # Also handle app.asar.unpacked if it exists
       NATIVE_DIR="$SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native"
       if [ -d "$NATIVE_DIR" ] || [ -d "${NATIVE_DIR%/*}" ]; then
         mkdir -p "$NATIVE_DIR"
         
-        # Create a stub index.js that doesn't require native bindings
+        # Copy the same stub
         cat > "$NATIVE_DIR/index.js" << 'EOF'
       // Linux stub for claude-native module
       console.log('[claude-native] Using Linux stub implementation');
@@ -198,9 +258,8 @@ parts:
       module.exports = stub;
       EOF
         
-        # Create empty .node file to prevent "file not found" errors
-        touch "$NATIVE_DIR/claude-native-binding.node"
-        chmod 755 "$NATIVE_DIR/claude-native-binding.node"
+        # Remove any existing .node file
+        rm -f "$NATIVE_DIR/claude-native-binding.node"
       fi
       
       # Extract and create icon
