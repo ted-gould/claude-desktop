@@ -20,7 +20,7 @@ description: |
 license: Proprietary
 contact: https://claude.ai/support
 website: https://claude.ai
-issues: https://github.com/ted-gould/claude-desktop-snap/issues
+issues: https://github.com/[community-maintainer]/claude-desktop-snap/issues
 
 grade: stable
 confinement: devmode
@@ -69,6 +69,8 @@ layout:
 parts:
   claude-desktop:
     plugin: nil
+    build-snaps:
+      - node/18/stable
     build-packages:
       - wget
       - p7zip-full
