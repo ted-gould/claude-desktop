@@ -212,8 +212,17 @@ parts:
       mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
       mkdir -p $SNAPCRAFT_PART_INSTALL/snap/gui
       
-      convert -size 256x256 xc:white -fill black -gravity center -pointsize 72 -annotate +0+0 'C' \
-        $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
+      # Create a simple icon without needing fonts
+      convert -size 256x256 xc:white \
+        -fill black \
+        -draw "circle 128,128 128,32" \
+        -fill white \
+        -draw "circle 128,128 128,48" \
+        $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png || {
+        # Fallback: just create a white square
+        convert -size 256x256 xc:white $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
+      }
+      
       cp $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png
       
       # Create desktop file
