@@ -79,7 +79,8 @@ parts:
       - npm
       - nodejs
       - build-essential
-      - python3
+      - gcc
+      - g++
     stage-packages:
       - libgtk-3-0
       - libnotify4
@@ -131,110 +132,81 @@ parts:
       find $SNAPCRAFT_PART_INSTALL -name "*.so" -type f -exec chmod 755 {} \;
       find $SNAPCRAFT_PART_INSTALL -name "claude" -type f -exec chmod 755 {} \;
       
-      # Create a native module stub
-      mkdir -p $SNAPCRAFT_PART_INSTALL/native-stub
-      cd $SNAPCRAFT_PART_INSTALL/native-stub
-      
-      # Create a minimal Node.js native addon that exports our stub functions
-      cat > binding.cc << 'EOF'
-      #include <node.h>
-      #include <v8.h>
-      
-      using namespace v8;
-      
-      void RegisterGlobalShortcut(const FunctionCallbackInfo<Value>& args) {
-        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
-      }
-      
-      void UnregisterGlobalShortcut(const FunctionCallbackInfo<Value>& args) {
-        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
-      }
-      
-      void UnregisterAllGlobalShortcuts(const FunctionCallbackInfo<Value>& args) {
-        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
-      }
-      
-      void SetTrayIcon(const FunctionCallbackInfo<Value>& args) {
-        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
-      }
-      
-      void ShowTrayBalloon(const FunctionCallbackInfo<Value>& args) {
-        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
-      }
-      
-      void GetWindowHandle(const FunctionCallbackInfo<Value>& args) {
-        args.GetReturnValue().SetNull();
-      }
-      
-      void IsAccessibilityEnabled(const FunctionCallbackInfo<Value>& args) {
-        args.GetReturnValue().Set(Boolean::New(args.GetIsolate(), true));
-      }
-      
-      void SetLoginItemSettings(const FunctionCallbackInfo<Value>& args) {
-        // No-op
-      }
-      
-      void GetLoginItemSettings(const FunctionCallbackInfo<Value>& args) {
-        Isolate* isolate = args.GetIsolate();
-        Local<Object> obj = Object::New(isolate);
-        obj->Set(isolate->GetCurrentContext(),
-                 String::NewFromUtf8(isolate, "openAtLogin").ToLocalChecked(),
-                 Boolean::New(isolate, false));
-        args.GetReturnValue().Set(obj);
-      }
-      
-      void Initialize(Local<Object> exports) {
-        NODE_SET_METHOD(exports, "registerGlobalShortcut", RegisterGlobalShortcut);
-        NODE_SET_METHOD(exports, "unregisterGlobalShortcut", UnregisterGlobalShortcut);
-        NODE_SET_METHOD(exports, "unregisterAllGlobalShortcuts", UnregisterAllGlobalShortcuts);
-        NODE_SET_METHOD(exports, "setTrayIcon", SetTrayIcon);
-        NODE_SET_METHOD(exports, "showTrayBalloon", ShowTrayBalloon);
-        NODE_SET_METHOD(exports, "getWindowHandle", GetWindowHandle);
-        NODE_SET_METHOD(exports, "isAccessibilityEnabled", IsAccessibilityEnabled);
-        NODE_SET_METHOD(exports, "setLoginItemSettings", SetLoginItemSettings);
-        NODE_SET_METHOD(exports, "getLoginItemSettings", GetLoginItemSettings);
-      }
-      
-      NODE_MODULE(NODE_GYP_MODULE_NAME, Initialize)
-      EOF
-      
-      # Create binding.gyp
-      cat > binding.gyp << 'EOF'
-      {
-        "targets": [
-          {
-            "target_name": "claude-native-binding",
-            "sources": [ "binding.cc" ]
-          }
-        ]
-      }
-      EOF
-      
-      # Create package.json
-      cat > package.json << 'EOF'
-      {
-        "name": "claude-native-stub",
-        "version": "1.0.0",
-        "gypfile": true
-      }
-      EOF
-      
-      # Build the native module for Electron 28
-      export npm_config_target=$ELECTRON_VERSION
-      export npm_config_arch=x64
-      export npm_config_target_arch=x64
-      export npm_config_disturl=https://electronjs.org/headers
-      export npm_config_runtime=electron
-      export npm_config_build_from_source=true
-      
-      HOME=/tmp npm install
-      HOME=/tmp ./node_modules/.bin/node-gyp rebuild --target=$ELECTRON_VERSION --arch=x64 --dist-url=https://electronjs.org/headers
-      
-      # Copy the built module to the correct location
+      # Create a fake native module that won't crash
       mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
-      cp build/Release/claude-native-binding.node $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native/
+      
+      # Instead of building a real native module, create a minimal valid ELF shared library
+      cd $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
+      
+      # Create a minimal C file that compiles to a valid shared library
+      cat > fake_node_module.c << 'EOF'
+      // Minimal valid shared library that can be loaded by dlopen
+      void _init() {}
+      void _fini() {}
+      EOF
+      
+      # Compile it to a shared library
+      gcc -shared -fPIC -o claude-native-binding.node fake_node_module.c || {
+        echo "Failed to compile fake module, creating empty file"
+        touch claude-native-binding.node
+      }
       
       cd -
+      
+      # Now we need to intercept the require() call
+      # Let's modify the Electron launch to preload a script
+      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources
+      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/preload-stub.js << 'EOF'
+      // Preload script to stub out native modules
+      const Module = require('module');
+      const path = require('path');
+      
+      // Store original _load
+      const originalLoad = Module._load;
+      
+      // Override Module._load
+      Module._load = function(request, parent, isMain) {
+        // Check if this is the claude-native module
+        if (request.includes('claude-native-binding.node') || 
+            (parent && parent.filename && parent.filename.includes('claude-native/index.js') && request.startsWith('./'))) {
+          console.log('Intercepting native module request:', request);
+          // Return our stub implementation
+          return {
+            registerGlobalShortcut: (shortcut, callback) => {
+              console.log(`Stub: registerGlobalShortcut ${shortcut}`);
+              return true;
+            },
+            unregisterGlobalShortcut: (shortcut) => {
+              console.log(`Stub: unregisterGlobalShortcut ${shortcut}`);
+              return true;
+            },
+            unregisterAllGlobalShortcuts: () => {
+              console.log('Stub: unregisterAllGlobalShortcuts');
+              return true;
+            },
+            setTrayIcon: (iconPath) => {
+              console.log('Stub: setTrayIcon');
+              return true;
+            },
+            showTrayBalloon: (title, content) => {
+              console.log(`Stub: showTrayBalloon ${title}`);
+              return true;
+            },
+            getWindowHandle: () => null,
+            isAccessibilityEnabled: () => true,
+            setLoginItemSettings: (settings) => {
+              console.log('Stub: setLoginItemSettings');
+            },
+            getLoginItemSettings: () => ({ openAtLogin: false })
+          };
+        }
+        
+        // Call original for everything else
+        return originalLoad.apply(this, arguments);
+      };
+      
+      console.log('Native module stub preload installed');
+      EOF
       
       # Create icon
       mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
@@ -298,6 +270,11 @@ parts:
       export ELECTRON_SNAP=$SNAP
       
       # Launch Claude Desktop
-      exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
+      # Try to use preload script to intercept native module loading
+      if [ -f "$SNAP/claude-desktop/resources/preload-stub.js" ]; then
+        exec "$SNAP/claude-desktop/claude" --no-sandbox --preload="$SNAP/claude-desktop/resources/preload-stub.js" "$@"
+      else
+        exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
+      fi
       EOF
       chmod +x $SNAPCRAFT_PART_INSTALL/bin/claude-desktop-wrapper
