@@ -20,7 +20,7 @@ description: |
 license: Proprietary
 contact: https://claude.ai/support
 website: https://claude.ai
-issues: https://github.com/[community-maintainer]/claude-desktop-snap/issues
+issues: https://github.com/ted-gould/claude-desktop-snap/issues
 
 grade: stable
 confinement: devmode
@@ -30,7 +30,7 @@ architectures:
 
 apps:
   claude-desktop:
-    command: bin/claude-desktop-wrapper
+    command: claude-desktop/claude
     desktop: snap/gui/claude-desktop.desktop
     extensions: [gnome]
     environment:
@@ -68,19 +68,12 @@ layout:
 
 parts:
   claude-desktop:
-    plugin: dump
-    source: https://storage.googleapis.com/osprey-downloads-c02f6a0d-347c-492b-a752-3e0651722e97/nest-win-x64/Claude-Setup-x64.exe
-    source-type: file
+    plugin: nil
     build-packages:
       - wget
       - p7zip-full
-      - imagemagick
       - unzip
-      - npm
-      - nodejs
-      - build-essential
-      - gcc
-      - g++
+      - jq
     stage-packages:
       - libgtk-3-0
       - libnotify4
@@ -92,198 +85,174 @@ parts:
       - libasound2
       - libgbm1
       - libdrm2
+      - libxkbcommon0
+      - libxrandr2
+      - libxcomposite1
+      - libxdamage1
+      - libxfixes3
+      - libxcursor1
+      - libxi6
+      - libx11-xcb1
     override-build: |
       set -eux
+      
+      # Download the Windows installer
+      wget -O Claude-Setup-x64.exe "https://storage.googleapis.com/osprey-downloads-c02f6a0d-347c-492b-a752-3e0651722e97/nest-win-x64/Claude-Setup-x64.exe"
       
       # Extract Windows installer
       7z x Claude-Setup-x64.exe
       
-      # The installer might contain another archive
+      # Extract the nupkg file
       NUPKG=$(find . -name "*.nupkg" | grep -v "delta" | head -1)
-      
       if [ -n "$NUPKG" ]; then
         echo "Found nupkg: $NUPKG"
         7z x "$NUPKG" -oapp_contents
-        
-        # The actual app files are usually in lib/net45 or similar
-        APP_DIR=$(find app_contents -name "Claude.exe" -o -name "resources" | head -1 | xargs dirname)
-        if [ -n "$APP_DIR" ]; then
-          mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop
-          cp -r "$APP_DIR"/* $SNAPCRAFT_PART_INSTALL/claude-desktop/
-        fi
       fi
       
-      # Download Linux Electron binary
-      ELECTRON_VERSION="28.0.0"
-      echo "Using Electron version: $ELECTRON_VERSION"
+      # Extract key information from the Windows app
+      cd app_contents/lib/net45
       
-      wget -O electron.zip "https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-linux-x64.zip"
-      unzip -o electron.zip -d $SNAPCRAFT_PART_INSTALL/claude-desktop/
+      # Get version and electron version from package.json in app.asar
+      npx asar extract resources/app.asar app_extracted
+      ELECTRON_VERSION=$(jq -r '.devDependencies.electron // "28.2.10"' app_extracted/package.json)
+      APP_VERSION=$(jq -r '.version // "0.9.3"' app_extracted/package.json)
+      echo "Detected Electron version: $ELECTRON_VERSION"
+      echo "Detected App version: $APP_VERSION"
+      
+      # Clean up extraction
+      rm -rf app_extracted
+      cd -
+      
+      # Download Linux Electron binary
+      echo "Downloading Electron $ELECTRON_VERSION for Linux..."
+      ELECTRON_ARCH="x64"
+      ELECTRON_URL="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-linux-${ELECTRON_ARCH}.zip"
+      wget -O electron.zip "$ELECTRON_URL"
+      
+      # Create the installation directory
+      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop
+      
+      # Extract Electron
+      unzip -q electron.zip -d $SNAPCRAFT_PART_INSTALL/claude-desktop/
       rm electron.zip
       
-      # Rename electron executable
+      # Copy app resources from Windows build
+      cp -r app_contents/lib/net45/resources $SNAPCRAFT_PART_INSTALL/claude-desktop/
+      cp app_contents/lib/net45/LICENSE* $SNAPCRAFT_PART_INSTALL/claude-desktop/ || true
+      
+      # Remove Windows-specific files
+      rm -f $SNAPCRAFT_PART_INSTALL/claude-desktop/*.dll
+      rm -f $SNAPCRAFT_PART_INSTALL/claude-desktop/*.exe
+      
+      # Rename electron executable to claude
       mv $SNAPCRAFT_PART_INSTALL/claude-desktop/electron $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
       chmod +x $SNAPCRAFT_PART_INSTALL/claude-desktop/claude
       
-      # Fix permissions
-      find $SNAPCRAFT_PART_INSTALL -type f -exec chmod 644 {} \;
-      find $SNAPCRAFT_PART_INSTALL -type d -exec chmod 755 {} \;
-      find $SNAPCRAFT_PART_INSTALL -name "*.node" -type f -exec chmod 755 {} \;
-      find $SNAPCRAFT_PART_INSTALL -name "*.so" -type f -exec chmod 755 {} \;
-      find $SNAPCRAFT_PART_INSTALL -name "claude" -type f -exec chmod 755 {} \;
-      
-      # Create a fake native module that won't crash
-      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
-      
-      # Instead of building a real native module, create a minimal valid ELF shared library
-      cd $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native
-      
-      # Create a minimal C file that compiles to a valid shared library
-      cat > fake_node_module.c << 'EOF'
-      // Minimal valid shared library that can be loaded by dlopen
-      void _init() {}
-      void _fini() {}
-      EOF
-      
-      # Compile it to a shared library
-      gcc -shared -fPIC -o claude-native-binding.node fake_node_module.c || {
-        echo "Failed to compile fake module, creating empty file"
-        touch claude-native-binding.node
-      }
-      
-      cd -
-      
-      # Now we need to intercept the require() call
-      # Let's modify the Electron launch to preload a script
-      mkdir -p $SNAPCRAFT_PART_INSTALL/claude-desktop/resources
-      cat > $SNAPCRAFT_PART_INSTALL/claude-desktop/resources/preload-stub.js << 'EOF'
-      // Preload script to stub out native modules
-      const Module = require('module');
-      const path = require('path');
-      
-      // Store original _load
-      const originalLoad = Module._load;
-      
-      // Override Module._load
-      Module._load = function(request, parent, isMain) {
-        // Check if this is the claude-native module
-        if (request.includes('claude-native-binding.node') || 
-            (parent && parent.filename && parent.filename.includes('claude-native/index.js') && request.startsWith('./'))) {
-          console.log('Intercepting native module request:', request);
-          // Return our stub implementation
-          return {
-            registerGlobalShortcut: (shortcut, callback) => {
-              console.log(`Stub: registerGlobalShortcut ${shortcut}`);
-              return true;
-            },
-            unregisterGlobalShortcut: (shortcut) => {
-              console.log(`Stub: unregisterGlobalShortcut ${shortcut}`);
-              return true;
-            },
-            unregisterAllGlobalShortcuts: () => {
-              console.log('Stub: unregisterAllGlobalShortcuts');
-              return true;
-            },
-            setTrayIcon: (iconPath) => {
-              console.log('Stub: setTrayIcon');
-              return true;
-            },
-            showTrayBalloon: (title, content) => {
-              console.log(`Stub: showTrayBalloon ${title}`);
-              return true;
-            },
-            getWindowHandle: () => null,
-            isAccessibilityEnabled: () => true,
-            setLoginItemSettings: (settings) => {
-              console.log('Stub: setLoginItemSettings');
-            },
-            getLoginItemSettings: () => ({ openAtLogin: false })
-          };
-        }
+      # Handle the native bindings issue by creating stub bindings
+      NATIVE_DIR="$SNAPCRAFT_PART_INSTALL/claude-desktop/resources/app.asar.unpacked/node_modules/claude-native"
+      if [ -d "$NATIVE_DIR" ] || [ -d "${NATIVE_DIR%/*}" ]; then
+        mkdir -p "$NATIVE_DIR"
         
-        // Call original for everything else
-        return originalLoad.apply(this, arguments);
+        # Create a stub index.js that doesn't require native bindings
+        cat > "$NATIVE_DIR/index.js" << 'EOF'
+      // Linux stub for claude-native module
+      console.log('[claude-native] Using Linux stub implementation');
+      
+      const stub = {
+        registerGlobalShortcut: (accelerator, callback) => {
+          console.log('[claude-native] registerGlobalShortcut:', accelerator);
+          return true;
+        },
+        unregisterGlobalShortcut: (accelerator) => {
+          console.log('[claude-native] unregisterGlobalShortcut:', accelerator);
+          return true;
+        },
+        unregisterAllGlobalShortcuts: () => {
+          console.log('[claude-native] unregisterAllGlobalShortcuts');
+          return true;
+        },
+        isAccessibilityEnabled: () => {
+          return true;
+        },
+        setLoginItemSettings: (settings) => {
+          console.log('[claude-native] setLoginItemSettings:', settings);
+        },
+        getLoginItemSettings: () => {
+          return { openAtLogin: false };
+        },
+        setTrayIcon: (iconPath) => {
+          console.log('[claude-native] setTrayIcon:', iconPath);
+          return true;
+        },
+        showTrayBalloon: (options) => {
+          console.log('[claude-native] showTrayBalloon:', options);
+          return true;
+        },
+        getWindowHandle: () => {
+          return null;
+        }
       };
       
-      console.log('Native module stub preload installed');
+      module.exports = stub;
       EOF
+        
+        # Create empty .node file to prevent "file not found" errors
+        touch "$NATIVE_DIR/claude-native-binding.node"
+        chmod 755 "$NATIVE_DIR/claude-native-binding.node"
+      fi
       
-      # Create icon
+      # Extract and create icon
       mkdir -p $SNAPCRAFT_PART_INSTALL/meta/gui
       mkdir -p $SNAPCRAFT_PART_INSTALL/snap/gui
       
-      # Create a simple icon without needing fonts
-      convert -size 256x256 xc:white \
-        -fill black \
-        -draw "circle 128,128 128,32" \
-        -fill white \
-        -draw "circle 128,128 128,48" \
-        $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png || {
-        # Fallback: just create a white square
-        convert -size 256x256 xc:white $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
-      }
+      # Try to extract icon from resources
+      ICON_PATH=""
+      for icon in $(find $SNAPCRAFT_PART_INSTALL/claude-desktop/resources -name "*.png" -o -name "*.ico" | grep -i icon | head -5); do
+        if [ -f "$icon" ]; then
+          ICON_PATH="$icon"
+          break
+        fi
+      done
       
-      cp $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png
+      if [ -n "$ICON_PATH" ] && [ -f "$ICON_PATH" ]; then
+        cp "$ICON_PATH" $SNAPCRAFT_PART_INSTALL/meta/gui/icon.png
+      else
+        # Create a simple icon as fallback
+        cat > $SNAPCRAFT_PART_INSTALL/meta/gui/icon.svg << 'EOF'
+      <svg width="256" height="256" xmlns="http://www.w3.org/2000/svg">
+        <rect width="256" height="256" fill="#f4f4f4"/>
+        <circle cx="128" cy="128" r="100" fill="#333333"/>
+        <text x="128" y="160" font-family="Arial" font-size="120" fill="white" text-anchor="middle">C</text>
+      </svg>
+      EOF
+      fi
+      
+      cp $SNAPCRAFT_PART_INSTALL/meta/gui/icon.* $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.png || true
       
       # Create desktop file
-      cat > $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.desktop << 'EOF'
+      cat > $SNAPCRAFT_PART_INSTALL/snap/gui/claude-desktop.desktop << EOF
       [Desktop Entry]
       Type=Application
-      Version=1.0
+      Version=1.1
       Name=Claude
       GenericName=AI Assistant
       Comment=Anthropic's Claude AI desktop application
-      Exec=claude-desktop %U
-      Icon=${SNAP}/meta/gui/icon.png
+      Icon=\${SNAP}/meta/gui/icon.png
+      Exec=claude-desktop --no-sandbox %U
       Terminal=false
       StartupNotify=true
-      Categories=Office;Utility;
+      StartupWMClass=Claude
+      Categories=Office;Chat;InstantMessaging;Network;
       Keywords=ai;assistant;claude;anthropic;chat;mcp;
       MimeType=x-scheme-handler/claude;
-      Actions=NewChat;
+      Actions=new-window;
       
-      [Desktop Action NewChat]
-      Name=New Chat
-      Exec=claude-desktop --new-chat
+      [Desktop Action new-window]
+      Name=New Chat Window
+      Exec=claude-desktop --no-sandbox --new-window
       EOF
-  
-  electron-wrapper:
-    plugin: nil
-    override-prime: |
-      snapcraftctl prime
-      # Ensure all files have proper permissions in the final snap
-      chmod -R u+r,g+r,o+r $SNAPCRAFT_PRIME
-      find $SNAPCRAFT_PRIME -type d -exec chmod 755 {} \;
-      find $SNAPCRAFT_PRIME -name "*.asar" -exec chmod 644 {} \;
-    override-build: |
-      # Create wrapper script to handle Electron execution
-      mkdir -p $SNAPCRAFT_PART_INSTALL/bin
-      cat > $SNAPCRAFT_PART_INSTALL/bin/claude-desktop-wrapper << 'EOF'
-      #!/bin/bash
-      set -e
       
-      # Ensure config directory exists
-      mkdir -p $SNAP_USER_DATA/.config/Claude
-      
-      # Copy default MCP config if it doesn't exist
-      if [ ! -f "$SNAP_USER_DATA/.config/Claude/claude_desktop_config.json" ]; then
-        cat > "$SNAP_USER_DATA/.config/Claude/claude_desktop_config.json" << 'EOCONF'
-      {
-        "mcpServers": {}
-      }
-      EOCONF
-      fi
-      
-      # Set up Electron environment
-      export ELECTRON_IS_SNAP=1
-      export ELECTRON_SNAP=$SNAP
-      
-      # Launch Claude Desktop
-      # Try to use preload script to intercept native module loading
-      if [ -f "$SNAP/claude-desktop/resources/preload-stub.js" ]; then
-        exec "$SNAP/claude-desktop/claude" --no-sandbox --preload="$SNAP/claude-desktop/resources/preload-stub.js" "$@"
-      else
-        exec "$SNAP/claude-desktop/claude" --no-sandbox "$@"
-      fi
-      EOF
-      chmod +x $SNAPCRAFT_PART_INSTALL/bin/claude-desktop-wrapper
+      # Set proper permissions
+      find $SNAPCRAFT_PART_INSTALL -type f -name "*.so" -exec chmod 755 {} \;
+      find $SNAPCRAFT_PART_INSTALL -type f -name "*.node" -exec chmod 755 {} \;
+      find $SNAPCRAFT_PART_INSTALL -type f -name "claude" -exec chmod 755 {} \;
