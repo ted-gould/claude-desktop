@@ -16,6 +16,14 @@ jobs:
       - name: Install Snapcraft
         run: sudo snap install snapcraft --classic
 
+      - name: Update snapd and core snaps
+        run: |
+          sudo snap install core --edge
+          sudo snap refresh core --edge
+          sudo snap refresh
+          sudo snap refresh core22 --stable
+          sudo snap set system experimental.retry-all-connections=true
+
       - name: Build Snap
         run: |
           cd snap
