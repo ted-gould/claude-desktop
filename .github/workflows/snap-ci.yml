@@ -16,15 +16,10 @@ jobs:
       - name: Install Snapcraft
         run: sudo snap install snapcraft --classic
 
-      - name: Install Multipass
-        run: sudo snap install multipass --classic
-
       - name: Build Snap
         run: |
           cd snap
-          snapcraft
-        env:
-          SNAPCRAFT_BUILD_ENVIRONMENT: multipass
+          snapcraft --destructive-mode
 
       - name: Upload Snap Artifact
         uses: actions/upload-artifact@v4
