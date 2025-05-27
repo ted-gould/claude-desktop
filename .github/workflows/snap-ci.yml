@@ -1,0 +1,60 @@
+name: Snap CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-and-test-snap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Snapcraft
+        run: sudo snap install snapcraft --classic
+
+      - name: Install Multipass
+        run: sudo snap install multipass --classic
+
+      - name: Build Snap
+        run: |
+          cd snap
+          snapcraft
+        env:
+          SNAPCRAFT_BUILD_ENVIRONMENT: multipass
+
+      - name: Upload Snap Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-desktop-snap
+          path: snap/*.snap
+
+      - name: Find Snap File
+        id: find_snap
+        run: |
+          SNAP_FILE_PATH=$(find snap -name "*.snap" -print -quit)
+          if [ -z "$SNAP_FILE_PATH" ]; then
+            echo "No .snap file found in snap/ directory"
+            exit 1
+          fi
+          echo "SNAP_FILE=$SNAP_FILE_PATH" >> $GITHUB_ENV
+          echo "Found snap file: $SNAP_FILE_PATH"
+
+      - name: Install Snap
+        run: |
+          echo "Installing snap from ${{ env.SNAP_FILE }}"
+          sudo snap install --dangerous "${{ env.SNAP_FILE }}"
+
+      - name: Test Snap Installation
+        run: |
+          echo "Running application from snap..."
+          claude-desktop --version
+
+          echo "Checking if snap is listed..."
+          snap list | grep claude-desktop
+
+          echo "Verifying desktop file..."
+          ls /var/lib/snapd/desktop/applications/claude-desktop_claude-desktop.desktop
