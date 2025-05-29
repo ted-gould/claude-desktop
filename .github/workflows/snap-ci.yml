@@ -13,10 +13,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install libunistring2
+      - name: Install wget via apt
         run: |
           sudo apt-get update
-          sudo apt-get install -y libunistring2
+          sudo apt-get install -y wget
 
       - name: Install Snapcraft
         run: sudo snap install snapcraft --classic
