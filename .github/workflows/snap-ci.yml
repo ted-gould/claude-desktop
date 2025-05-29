@@ -23,6 +23,7 @@ jobs:
         run: |
           sudo snap install gnome-42-2204 --classic
           sudo snap install gnome-42-2204-sdk --classic
+          sudo snap install gtk-common-themes --stable
 
       - name: Build Snap
         run: |
