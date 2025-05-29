@@ -23,6 +23,9 @@ jobs:
           sudo snap install core22 --stable
           sudo snap refresh
 
+      - name: Pre-install GNOME platform snap
+        run: sudo snap install gnome-42-2204 --classic
+
       - name: Build Snap
         run: |
           cd snap
