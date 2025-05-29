@@ -19,10 +19,24 @@ jobs:
       - name: Install core22 base snap
         run: sudo snap install core22 --stable
 
+      - name: Install GNOME platform and SDK snaps
+        run: |
+          sudo snap install gnome-42-2204 --classic
+          sudo snap install gnome-42-2204-sdk --classic
+
       - name: Build Snap
         run: |
           cd snap
-          snapcraft --destructive-mode
+          if ! snapcraft --destructive-mode; then
+            echo "Snapcraft build failed. Displaying log:"
+            LOG_FILE=$(ls -t /home/runner/.local/state/snapcraft/log/snapcraft-*.log | head -n 1)
+            if [ -f "$LOG_FILE" ]; then
+              cat "$LOG_FILE"
+            else
+              echo "Snapcraft log file not found at expected location."
+            fi
+            exit 1
+          fi
 
       - name: Upload Snap Artifact
         uses: actions/upload-artifact@v4
