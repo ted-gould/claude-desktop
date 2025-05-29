@@ -1,0 +1,78 @@
+name: Snap CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-and-test-snap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install wget via apt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+
+      - name: Install Snapcraft
+        run: sudo snap install snapcraft --classic
+
+      - name: Install core22 base snap
+        run: sudo snap install core22 --stable
+
+      - name: Install GNOME platform and SDK snaps
+        run: |
+          sudo snap install gnome-42-2204 --classic
+          sudo snap install gnome-42-2204-sdk --classic
+          sudo snap install gtk-common-themes --stable
+
+      - name: Build Snap
+        run: |
+          cd snap
+          if ! sudo snapcraft --destructive-mode; then
+            echo "Snapcraft build failed. Displaying log:"
+            LOG_FILE=$(ls -t /home/runner/.local/state/snapcraft/log/snapcraft-*.log | head -n 1)
+            if [ -f "$LOG_FILE" ]; then
+              cat "$LOG_FILE"
+            else
+              echo "Snapcraft log file not found at expected location."
+            fi
+            exit 1
+          fi
+
+      - name: Upload Snap Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-desktop-snap
+          path: snap/*.snap
+
+      - name: Find Snap File
+        id: find_snap
+        run: |
+          SNAP_FILE_PATH=$(find snap -name "*.snap" -print -quit)
+          if [ -z "$SNAP_FILE_PATH" ]; then
+            echo "No .snap file found in snap/ directory"
+            exit 1
+          fi
+          echo "SNAP_FILE=$SNAP_FILE_PATH" >> $GITHUB_ENV
+          echo "Found snap file: $SNAP_FILE_PATH"
+
+      - name: Install Snap
+        run: |
+          echo "Installing snap from ${{ env.SNAP_FILE }}"
+          sudo snap install --dangerous "${{ env.SNAP_FILE }}"
+
+      - name: Test Snap Installation
+        run: |
+          echo "Running application from snap..."
+          claude-desktop --version
+
+          echo "Checking if snap is listed..."
+          snap list | grep claude-desktop
+
+          echo "Verifying desktop file..."
+          ls /var/lib/snapd/desktop/applications/claude-desktop_claude-desktop.desktop
