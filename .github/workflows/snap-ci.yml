@@ -22,7 +22,6 @@ jobs:
           sudo snap refresh core --edge
           sudo snap install core22 --stable
           sudo snap refresh
-          sudo snap set system experimental.retry-all-connections=true
 
       - name: Build Snap
         run: |
