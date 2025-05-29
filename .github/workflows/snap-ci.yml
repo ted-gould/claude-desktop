@@ -28,7 +28,7 @@ jobs:
       - name: Build Snap
         run: |
           cd snap
-          if ! snapcraft --destructive-mode; then
+          if ! sudo snapcraft --destructive-mode; then
             echo "Snapcraft build failed. Displaying log:"
             LOG_FILE=$(ls -t /home/runner/.local/state/snapcraft/log/snapcraft-*.log | head -n 1)
             if [ -f "$LOG_FILE" ]; then
